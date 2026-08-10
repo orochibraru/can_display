@@ -1,0 +1,4 @@
+/bin/
+*.uf2
+*.bin
+.DS_Store

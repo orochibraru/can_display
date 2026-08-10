@@ -1,0 +1,114 @@
+package ui
+
+import (
+	"fmt"
+	"image/color"
+	"time"
+
+	"tinygo.org/x/tinyfont"
+	"tinygo.org/x/tinyfont/freesans"
+
+	"orochibraru/can_display/internal/display"
+	"orochibraru/can_display/internal/signals"
+)
+
+// labelFont/valueFont are shared across every tile so the whole
+// dashboard has one consistent type scale. They're deliberately not
+// configurable per-tile -- if you want a different look, change it here
+// and every tile follows.
+var (
+	labelFont = &freesans.Bold9pt7b
+	valueFont = &freesans.Bold24pt7b
+)
+
+// Rect is a pixel rectangle on the display.
+type Rect struct {
+	X, Y, W, H int16
+}
+
+// Range defines the thresholds a Tile uses to color its value and to
+// place it on the fill bar.
+type Range struct {
+	Min, Max              float32 // bar endpoints
+	WarnLow, WarnHigh     float32 // outside this band -> Warning color
+	DangerLow, DangerHigh float32 // outside this band -> Danger color
+}
+
+func (r Range) colorFor(v float32, t Theme) color.RGBA {
+	switch {
+	case v <= r.DangerLow || v >= r.DangerHigh:
+		return t.Danger
+	case v <= r.WarnLow || v >= r.WarnHigh:
+		return t.Warning
+	default:
+		return t.Good
+	}
+}
+
+func (r Range) fraction(v float32) float32 {
+	if r.Max <= r.Min {
+		return 0
+	}
+	f := (v - r.Min) / (r.Max - r.Min)
+	switch {
+	case f < 0:
+		return 0
+	case f > 1:
+		return 1
+	default:
+		return f
+	}
+}
+
+// Tile is a single rectangular gauge: a label, a big numeric value with
+// a unit suffix, and a horizontal fill bar colored by Range.
+type Tile struct {
+	Label  string
+	Unit   string
+	Format string // fmt verb for the value, e.g. "%.0f" or "%.1f"
+	Range  Range
+	// StaleAfter is how long since the last update before this tile
+	// shows "--" instead of a frozen last value.
+	StaleAfter time.Duration
+}
+
+// Draw renders the tile inside rect using reading as its current value.
+func (t Tile) Draw(d display.Display, theme Theme, rect Rect, reading signals.Reading, now time.Time) {
+	fillRect(d, rect, theme.Background)
+
+	labelX, labelY := rect.X+8, rect.Y+18
+	tinyfont.WriteLine(d, labelFont, labelX, labelY, t.Label, theme.Label)
+
+	stale := reading.Stale(now, t.StaleAfter)
+
+	valueStr := "--"
+	valColor := theme.Stale
+	frac := float32(0)
+	if !stale {
+		valueStr = fmt.Sprintf(t.Format, reading.Value) + t.Unit
+		valColor = t.Range.colorFor(reading.Value, theme)
+		frac = t.Range.fraction(reading.Value)
+	}
+
+	valueY := labelY + 40
+	tinyfont.WriteLine(d, valueFont, rect.X+8, valueY, valueStr, valColor)
+
+	barRect := Rect{X: rect.X + 8, Y: rect.Y + rect.H - 12, W: rect.W - 16, H: 6}
+	drawBar(d, barRect, frac, valColor, theme.Stale)
+}
+
+func fillRect(d display.Display, r Rect, c color.RGBA) {
+	for y := r.Y; y < r.Y+r.H; y++ {
+		for x := r.X; x < r.X+r.W; x++ {
+			d.SetPixel(x, y, c)
+		}
+	}
+}
+
+func drawBar(d display.Display, r Rect, frac float32, fillColor, trackColor color.RGBA) {
+	fillRect(d, r, trackColor)
+	filled := int16(float32(r.W) * frac)
+	if filled > 0 {
+		fillRect(d, Rect{X: r.X, Y: r.Y, W: filled, H: r.H}, fillColor)
+	}
+}
