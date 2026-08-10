@@ -88,9 +88,10 @@ func (g *game) Layout(outsideWidth, outsideHeight int) (int, int) {
 
 func main() {
 	gen := sim.NewGenerator()
-	// Preview the tiles that don't have a real data source yet, so the
-	// layout/coloring can be developed even before those sensors exist.
-	// Flip these off to see exactly what the firmware shows today.
+	// Ethanol % has a real data source in the firmware now (an MCP3008 +
+	// flex-fuel sensor, see internal/sensors), so it's enabled here too
+	// for parity. Battery/AFR are still preview-only: flip them off to
+	// see exactly what the firmware can show today.
 	gen.EnableBattery = true
 	gen.EnableAFR = true
 	gen.EnableEthanol = true

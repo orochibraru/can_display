@@ -1,10 +1,11 @@
 //go:build tinygo
 
 // Command firmware is the ESP32 program: it reads the GT86's CAN bus
-// through an MCP2515 SPI controller and renders internal/ui's dashboard
-// to an ST7789 SPI display. It shares every package under internal/
-// with cmd/simulator -- only this file and the pin wiring are specific
-// to real hardware.
+// through an MCP2515 SPI controller, reads the flex-fuel sensor through
+// an MCP3008 SPI ADC, and renders internal/ui's dashboard to an ST7789
+// SPI display. It shares every package under internal/ with
+// cmd/simulator -- only this file and the pin wiring are specific to
+// real hardware.
 //
 // Build with TinyGo, not `go build` (this file needs the `machine`
 // package, which only exists under the TinyGo compiler). See the
@@ -15,11 +16,14 @@ import (
 	"machine"
 	"time"
 
+	"tinygo.org/x/drivers"
 	"tinygo.org/x/drivers/mcp2515"
+	"tinygo.org/x/drivers/mcp3008"
 	"tinygo.org/x/drivers/st7789"
 
 	"orochibraru/can_display/internal/canbus"
 	"orochibraru/can_display/internal/canbus/gt86"
+	"orochibraru/can_display/internal/sensors"
 	"orochibraru/can_display/internal/signals"
 	"orochibraru/can_display/internal/ui"
 )
@@ -27,9 +31,11 @@ import (
 // Pin wiring -- adjust these to match your actual breadboard/PCB layout;
 // see /docs/wiring.md for the reference wiring this project assumes.
 //
-// Two separate SPI buses are used (SPI2 for the display, SPI3 for the
-// CAN controller) so a display refresh never blocks a CAN read, and
-// vice versa.
+// The classic ESP32 only has two general-purpose SPI peripherals
+// (SPI2/SPI3 -- SPI0/SPI1 are reserved for flash). The display gets its
+// own bus (SPI2); the MCP2515 CAN controller and MCP3008 ADC share the
+// other (SPI3) with separate chip-selects, since neither needs the bus
+// often enough for that to matter.
 const (
 	displaySCK   = machine.GPIO18
 	displaySDO   = machine.GPIO23 // MOSI; display is write-only, no MISO needed
@@ -38,11 +44,21 @@ const (
 	displayCS    = machine.GPIO5
 	displayBL    = machine.GPIO15
 
-	canSCK = machine.GPIO14
-	canSDO = machine.GPIO13 // MOSI
-	canSDI = machine.GPIO12 // MISO
-	canCS  = machine.GPIO27
+	sharedSCK = machine.GPIO14
+	sharedSDO = machine.GPIO13 // MOSI
+	sharedSDI = machine.GPIO12 // MISO
+	canCS     = machine.GPIO27
+	ethanolCS = machine.GPIO26
+
+	// ethanolADCChannel is which MCP3008 input the flex-fuel sensor's
+	// (divided-down) signal is wired to. See /docs/wiring.md.
+	ethanolADCChannel = 0
 )
+
+// adcVref is the MCP3008's reference voltage. The MCP3008 is powered
+// from the ESP32's 3.3V rail here (so its SPI logic levels match the
+// ESP32 without a level shifter), which also sets its analog reference.
+const adcVref float32 = 3.3
 
 // panelWidth/panelHeight must match cmd/simulator's constants -- both
 // feed the same internal/ui.Dashboard, which lays itself out to
@@ -52,22 +68,24 @@ const (
 	panelHeight = 320
 )
 
-// renderInterval caps how often the dashboard redraws. The CAN bus
-// itself updates much faster than this; there's no point redrawing the
-// panel faster than a human can read it, and every full-screen redraw
-// costs real SPI bus time.
-const renderInterval = 100 * time.Millisecond
+// tickInterval caps how often the dashboard redraws and the ethanol
+// sensor is re-read. The CAN bus itself updates much faster than this;
+// there's no point redrawing the panel faster than a human can read it,
+// and every full-screen redraw costs real SPI bus time.
+const tickInterval = 100 * time.Millisecond
 
 func main() {
 	display := setupDisplay()
-	can := setupCAN()
+	sharedSPI := setupSharedSPI()
+	can := setupCAN(sharedSPI)
+	ethanolADC := setupEthanolADC(sharedSPI)
 
 	state := &signals.State{}
 	reg := canbus.NewRegistry()
 	gt86.Register(reg, state)
 
 	// The CAN read loop runs forever in its own goroutine; the main
-	// goroutine just redraws whatever the latest state is, on a timer.
+	// goroutine polls the ADC and redraws on a timer.
 	go func() {
 		err := reg.Run(mcp2515Bus{dev: can})
 		// Run only returns on a read error, which means the MCP2515 (or
@@ -78,12 +96,30 @@ func main() {
 
 	dash := ui.Dashboard{Theme: ui.Dark, Tiles: ui.DefaultTiles()}
 	for {
+		updateEthanolPercent(ethanolADC, state)
+
 		snap := state.Snapshot()
 		if err := dash.Render(&display, snap); err != nil {
 			println("render error:", err.Error())
 		}
-		time.Sleep(renderInterval)
+		time.Sleep(tickInterval)
 	}
+}
+
+// updateEthanolPercent reads the flex-fuel sensor through the MCP3008,
+// undoes the resistor divider, and converts the result to a percentage.
+// See internal/sensors for the conversion math and its caveats.
+func updateEthanolPercent(adc *mcp3008.Device, state *signals.State) {
+	raw, err := adc.Read(ethanolADCChannel)
+	if err != nil {
+		// Leave the last known reading in place; if the ADC is actually
+		// dead this signal will go stale on its own and the dashboard
+		// will show "--" rather than a frozen number.
+		return
+	}
+	adcVolts := sensors.RawToVolts(raw, adcVref)
+	sensorVolts := sensors.EthanolDivider.Undo(adcVolts)
+	state.SetEthanolPercent(sensors.EthanolPercent(sensorVolts), time.Now())
 }
 
 func setupDisplay() st7789.Device {
@@ -106,18 +142,28 @@ func setupDisplay() st7789.Device {
 	return dev
 }
 
-func setupCAN() *mcp2515.Device {
+// setupSharedSPI configures the bus the MCP2515 and MCP3008 share.
+//
+// The clock is deliberately conservative (1MHz): the MCP3008 is only
+// rated for a couple MHz when powered at 3.3V (its max SPI clock scales
+// with VDD), while the MCP2515 is happy anywhere up to several MHz. One
+// shared frequency has to satisfy both, and neither device is read
+// often enough for 1MHz to be a bottleneck.
+func setupSharedSPI() drivers.SPI {
 	spi := machine.SPI3
 	err := spi.Configure(machine.SPIConfig{
-		Frequency: 10e6,
-		SCK:       canSCK,
-		SDO:       canSDO,
-		SDI:       canSDI,
+		Frequency: 1e6,
+		SCK:       sharedSCK,
+		SDO:       sharedSDO,
+		SDI:       sharedSDI,
 	})
 	if err != nil {
-		panic("CAN SPI configure: " + err.Error())
+		panic("shared SPI configure: " + err.Error())
 	}
+	return spi
+}
 
+func setupCAN(spi drivers.SPI) *mcp2515.Device {
 	dev := mcp2515.New(spi, canCS)
 	dev.Configure(mcp2515.Configuration{Extended: false})
 
@@ -127,5 +173,11 @@ func setupCAN() *mcp2515.Device {
 	if err := dev.Begin(mcp2515.CAN500kBps, mcp2515.Clock16MHz); err != nil {
 		panic("CAN begin: " + err.Error())
 	}
+	return dev
+}
+
+func setupEthanolADC(spi drivers.SPI) *mcp3008.Device {
+	dev := mcp3008.New(spi, ethanolCS)
+	dev.Configure()
 	return dev
 }

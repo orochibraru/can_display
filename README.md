@@ -45,6 +45,10 @@ tinygo` on macOS).
 - ST7789 2.0" 240x320 SPI TFT display
 - MCP2515 SPI CAN controller module, wired to the OBD-II port's CAN H/L
   (pins 6/14)
+- MCP3008 SPI ADC + an analog (0.5V-4.5V) flex-fuel sensor, for ethanol
+  % — the classic ESP32 has no usable ADC in TinyGo, so this is read
+  externally instead of through the chip's own ADC pins (see
+  `docs/wiring.md`)
 
 Full pin mapping: [`docs/wiring.md`](docs/wiring.md).
 
@@ -54,9 +58,9 @@ Full pin mapping: [`docs/wiring.md`](docs/wiring.md).
 |---|---|---|
 | Coolant temp | Factory CAN, `0x360` | Decoded, **unverified on this car** |
 | Oil temp | Factory CAN, `0x360` | Decoded, **unverified on this car** |
+| Ethanol % | Local ADC (MCP3008 + flex-fuel sensor, not CAN) | Decoded, **sensor curve (0.5V=0%/4.5V=100%) unverified against the actual sensor's datasheet** |
 | Battery voltage | — | Not found on the factory bus yet; tile is wired up and waiting |
 | AFR | — | Not on the factory bus at all; needs an aftermarket wideband broadcasting on CAN |
-| Ethanol % | — | Not on the factory bus at all; needs an aftermarket flex-fuel sensor broadcasting on CAN |
 
 The CAN IDs/formulas in use come from community reverse-engineering,
 not factory documentation — **do not trust them blindly**. See
@@ -64,9 +68,9 @@ not factory documentation — **do not trust them blindly**. See
 for how to verify them on your own car (and how to add the missing
 ones) with a cheap USB-CAN adapter.
 
-The simulator defaults to previewing all five tiles, including the
-three without a real data source yet, so the layout can be designed
-before the hardware exists. Flip `Enable*` off in
+The simulator defaults to previewing all five tiles, including the two
+(battery, AFR) without a real data source yet, so the layout can be
+designed before that hardware exists. Flip `Enable*` off in
 `cmd/simulator/main.go`'s `main()` to see exactly what the firmware
 shows today.
 
@@ -76,6 +80,11 @@ shows today.
   `tinygo.org/x/drivers.Displayer`. Any TinyGo display driver satisfies
   it for free, and the simulator's software framebuffer satisfies it
   too — so `internal/ui` never needs to know which one it's talking to.
+- **`internal/sensors`** holds conversion math for locally-wired analog
+  sensors (currently just ethanol %) — the non-CAN counterpart to
+  `internal/canbus/gt86`. Pure functions, no hardware access, so the
+  voltage-divider and sensor-curve math is unit tested without needing
+  an ESP32 or a multimeter.
 - **Text rendering** uses `tinygo.org/x/tinyfont` (`freesans`) on both
   targets, on purpose — the simulator should look pixel-for-pixel like
   the real panel, not just "similar."
