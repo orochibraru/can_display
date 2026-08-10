@@ -99,6 +99,10 @@ hardware exists. Flip `Enable*` off in `cmd/simulator/main.go`'s
   A `canbus.Writer` (separate from the read-only `canbus.Bus`, since
   most sources here can't transmit) is what makes sending a request
   possible in the first place.
+- **`internal/ui/config.go`** is the one file to edit to retune what
+  counts as normal/warning/danger for any gauge (idle RPM redline,
+  coolant/oil temp limits, etc.) — `dashboard.go` just wires those
+  values into tiles and shouldn't need to change alongside them.
 - Every package under `internal/` builds with plain `go build`/`go
   test` — only `cmd/firmware` needs TinyGo (it's gated behind a
   `//go:build tinygo` tag so `go build ./...` from the repo root
