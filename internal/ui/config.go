@@ -22,7 +22,7 @@ const DefaultStaleAfter = 2 * time.Second
 // shift-light-style ramp into the rev limiter. No meaningful "too low"
 // danger while running, so the low thresholds are set below the
 // gauge's own range to never trigger.
-var RPMRange = Range{Min: 0, Max: 8000, WarnLow: -1, WarnHigh: 7000, DangerLow: -1, DangerHigh: 7600}
+var RPMRange = Range{Min: 0, Max: 8000, WarnLow: -1, WarnHigh: 7000, DangerLow: -1, DangerHigh: 7400}
 
 // CoolantRange: normal operating range for the FA20 is roughly
 // 85-105°C; danger thresholds sit outside that with a small buffer so
