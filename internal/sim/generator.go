@@ -19,10 +19,11 @@ type Generator struct {
 	rng   *rand.Rand
 
 	// EnableAFR/EnableEthanol/EnableBattery let you preview what the
-	// dashboard looks like once those signals are actually wired up to
-	// a data source, even though the real firmware doesn't have one yet
-	// (see internal/canbus/gt86). Off by default so the simulator's
-	// default view matches what the firmware can actually show today.
+	// dashboard looks like for signals that don't have a *confirmed*
+	// real data source yet (see internal/canbus/gt86 and
+	// internal/sensors for what's actually wired up vs. still
+	// speculative/missing). Off by default so the simulator's default
+	// view matches what the firmware can reliably show today.
 	EnableAFR, EnableEthanol, EnableBattery bool
 }
 
@@ -43,6 +44,15 @@ func (g *Generator) Tick(state *signals.State, now time.Time) {
 	oil := 20 + warmup*95 + noise(g.rng, 2)
 	state.SetCoolantTempC(coolant, now)
 	state.SetOilTempC(oil, now)
+
+	// RPM: idles around 850 with periodic revs up toward redline, so
+	// the RPM tile's warning/danger color bands are visible in the
+	// simulator too, not just a flat idle number. Always on, like
+	// coolant/oil temp -- RPM has a real decoder (internal/canbus/gt86),
+	// it's not speculative like the Enable*-gated signals below.
+	revFraction := clamp(float32(math.Sin(t/6)), 0, 1)
+	rpm := 850 + revFraction*6700 + noise(g.rng, 50)
+	state.SetRPM(rpm, now)
 
 	if g.EnableBattery {
 		vibration := float32(math.Sin(t / 5))

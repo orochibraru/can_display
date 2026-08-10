@@ -22,6 +22,16 @@ type Bus interface {
 	ReadFrame() (Frame, error)
 }
 
+// Writer is implemented by a Bus that can also transmit frames. Kept
+// separate from Bus (rather than folded into it) because most of this
+// project only ever listens -- a replayed candump log, for instance,
+// has no meaningful way to "send" anything. Only protocols that need
+// to ask for data, like OBD-II request/response (see
+// internal/canbus/obd2), need this.
+type Writer interface {
+	WriteFrame(f Frame) error
+}
+
 // Decoder updates application state from one CAN frame. Decoders should
 // return quickly (no blocking I/O) since they run inline with the read
 // loop.

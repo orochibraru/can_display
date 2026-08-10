@@ -13,7 +13,9 @@ import (
 // mcp2515Bus adapts an *mcp2515.Device -- which exposes polling methods,
 // Received() and Rx() -- to canbus.Bus's blocking ReadFrame(), so the
 // same canbus.Registry.Run loop works regardless of what kind of bus
-// it's reading from.
+// it's reading from. It also implements canbus.Writer (WriteFrame),
+// needed for the OBD-II request/response polling in
+// internal/canbus/obd2 -- the passive decoders never use that side.
 type mcp2515Bus struct {
 	dev *mcp2515.Device
 }
@@ -35,4 +37,8 @@ func (b mcp2515Bus) ReadFrame() (canbus.Frame, error) {
 	f := canbus.Frame{ID: msg.ID, DLC: msg.Dlc}
 	copy(f.Data[:], msg.Data)
 	return f, nil
+}
+
+func (b mcp2515Bus) WriteFrame(f canbus.Frame) error {
+	return b.dev.Tx(f.ID, f.DLC, f.Data[:f.DLC])
 }

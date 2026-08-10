@@ -20,11 +20,24 @@ type DashTile struct {
 	Value func(signals.Snapshot) signals.Reading
 }
 
-// DefaultTiles is the stock GT86 layout. Coolant and oil temp have real
-// decoders today (internal/canbus/gt86); battery/AFR/ethanol are wired
-// up and waiting on a data source -- see that package's doc comment.
+// DefaultTiles is the stock GT86 layout. Coolant, oil temp and RPM have
+// real decoders today (internal/canbus/gt86); battery/AFR/ethanol are
+// wired up and waiting on a data source -- see that package's doc
+// comment.
 func DefaultTiles() []DashTile {
 	return []DashTile{
+		{
+			Tile: Tile{
+				// FA20 redline is ~7000-7600 RPM; WarnHigh/DangerHigh give
+				// a shift-light-style ramp into the rev limiter. No
+				// meaningful "too low" danger while running, so the low
+				// thresholds are set below the gauge's own range to never
+				// trigger (same trick used for ETHANOL below).
+				Label: "RPM", Unit: "", Format: "%.0f", StaleAfter: DefaultStaleAfter,
+				Range: Range{Min: 0, Max: 8000, WarnLow: -1, WarnHigh: 7000, DangerLow: -1, DangerHigh: 7600},
+			},
+			Value: func(s signals.Snapshot) signals.Reading { return s.RPM },
+		},
 		{
 			Tile: Tile{
 				Label: "COOLANT", Unit: "°C", Format: "%.0f", StaleAfter: DefaultStaleAfter,

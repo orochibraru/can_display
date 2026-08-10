@@ -45,6 +45,27 @@ func TestDecodeTemperaturesIgnoresShortFrames(t *testing.T) {
 	}
 }
 
+func TestDecodeRPM(t *testing.T) {
+	state := &signals.State{}
+	reg := canbus.NewRegistry()
+	Register(reg, state)
+
+	// 3000 RPM = 0x0BB8, as a 14-bit little-endian value at bytes 2-3.
+	// The two garbage high bits set in byte 3 (0xC0) should be masked
+	// off rather than corrupting the result.
+	frame := canbus.Frame{
+		ID:   IDThrottleRPM,
+		DLC:  8,
+		Data: [8]byte{0, 0, 0xB8, 0x0B | 0xC0, 0, 0, 0, 0},
+	}
+	reg.Dispatch(frame, time.Now())
+
+	snap := state.Snapshot()
+	if !snap.RPM.Valid || snap.RPM.Value != 3000 {
+		t.Errorf("RPM = %+v, want valid 3000", snap.RPM)
+	}
+}
+
 func TestUnregisteredIDIsIgnored(t *testing.T) {
 	state := &signals.State{}
 	reg := canbus.NewRegistry()

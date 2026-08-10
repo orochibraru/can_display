@@ -83,15 +83,26 @@ func main() {
 	state := &signals.State{}
 	reg := canbus.NewRegistry()
 	gt86.Register(reg, state)
+	bus := mcp2515Bus{dev: can}
 
 	// The CAN read loop runs forever in its own goroutine; the main
 	// goroutine polls the ADC and redraws on a timer.
 	go func() {
-		err := reg.Run(mcp2515Bus{dev: can})
+		err := reg.Run(bus)
 		// Run only returns on a read error, which means the MCP2515 (or
 		// its SPI link) is in a bad state -- crash loudly rather than
 		// silently freezing the dash with stale numbers.
 		panic("CAN read loop exited: " + err.Error())
+	}()
+
+	// AFR needs an active request/response, not passive listening --
+	// see internal/canbus/gt86's afr.go for why, and for how
+	// speculative this one is. Its response comes back through reg
+	// above like any other frame.
+	go func() {
+		if err := gt86.AFRPoller(bus).Run(); err != nil {
+			panic("AFR poll loop exited: " + err.Error())
+		}
 	}()
 
 	dash := ui.Dashboard{Theme: ui.Dark, Tiles: ui.DefaultTiles()}

@@ -38,6 +38,7 @@ type State struct {
 	batteryVoltage Reading
 	afr            Reading
 	ethanolPercent Reading
+	rpm            Reading
 }
 
 // Snapshot is a point-in-time copy of State, safe to read without a lock.
@@ -47,6 +48,7 @@ type Snapshot struct {
 	BatteryVoltage Reading
 	AFR            Reading
 	EthanolPercent Reading
+	RPM            Reading
 	At             time.Time
 }
 
@@ -60,6 +62,7 @@ func (s *State) Snapshot() Snapshot {
 		BatteryVoltage: s.batteryVoltage,
 		AFR:            s.afr,
 		EthanolPercent: s.ethanolPercent,
+		RPM:            s.rpm,
 		At:             time.Now(),
 	}
 }
@@ -69,6 +72,7 @@ func (s *State) SetOilTempC(v float32, at time.Time)       { s.set(&s.oilTempC, 
 func (s *State) SetBatteryVoltage(v float32, at time.Time) { s.set(&s.batteryVoltage, v, at) }
 func (s *State) SetAFR(v float32, at time.Time)            { s.set(&s.afr, v, at) }
 func (s *State) SetEthanolPercent(v float32, at time.Time) { s.set(&s.ethanolPercent, v, at) }
+func (s *State) SetRPM(v float32, at time.Time)            { s.set(&s.rpm, v, at) }
 
 func (s *State) set(field *Reading, v float32, at time.Time) {
 	s.mu.Lock()

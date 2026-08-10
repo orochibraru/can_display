@@ -13,11 +13,12 @@ especially before making driving decisions based on it.
 
 | Signal | Status |
 |---|---|
+| RPM | Decoded from `0x140` bytes 2-3, 14-bit little-endian, no scaling. Unverified on this car. (`0x141` bytes 4-5 carries a second copy, per the same source, if this one needs cross-checking.) |
 | Coolant temp | Decoded from `0x360` byte 3, `value - 40`°C. Unverified on this car. |
 | Oil temp | Decoded from `0x360` byte 2, `value - 40`°C. Unverified on this car. |
+| AFR | Polled via OBD-II Mode 01 PID 0x24 (standard, not reverse-engineered) from the factory wideband sensor. Whether this ECU actually answers it hasn't been confirmed — see the dedicated section below. |
 | Battery voltage | **Not found** in any factory-bus reverse-engineering doc so far. Needs new reverse-engineering work (see below). |
-| AFR | Not on the factory bus at all — the stock ECU doesn't compute or broadcast it. Needs an aftermarket wideband O2 controller broadcasting onto the bus. |
-| Ethanol % | Not on the factory bus at all — needs an aftermarket flex-fuel sensor broadcasting onto the bus. |
+| Ethanol % | Not on CAN at all — read from a locally-wired analog sensor instead. See `docs/wiring.md` and `internal/sensors`. |
 
 ## How to check (or find) an ID
 
@@ -32,6 +33,10 @@ platform, nicer UI) works.
    accessories being toggled), log a minute or two of traffic.
 3. To find a specific signal: change *one thing* at a time and diff the
    log against a baseline.
+   - RPM: this is the easiest one to sanity-check — rev the engine and
+     watch bytes 2-3 of `0x140` count up and back down in step with the
+     tach. If they don't, it's worth trying bytes 4-5 of `0x141`
+     instead (the same value is supposedly duplicated there).
    - Coolant/oil temp: compare a cold start against 5 minutes of idling
      — the target bytes should climb steadily as the values in
      `0x360` are expected to (byte 2 and 3, `raw - 40` = °C). If they
@@ -48,15 +53,51 @@ platform, nicer UI) works.
    so the next person (including future you) knows what's actually been
    confirmed versus copied from a forum post.
 
-## Adding an aftermarket AFR/ethanol source
+## Verifying AFR (OBD-II PID 0x24)
 
-If you add a standalone wideband controller or flex-fuel sensor that
-broadcasts onto CAN (many popular ones do, e.g. Haltech's CAN broadcast
-protocol, AEM's, etc.), the pattern is the same: find its documented
-frame layout (these are usually actually documented by the
-manufacturer, unlike the factory bus), write a decoder function with
-the same shape as `decodeTemperatures`, and `reg.Register(id, decoder)`
-it. The rest of the pipeline — `internal/ui`, the simulator, staleness
-handling — doesn't need to change at all; it already has tiles wired up
-for `AFR` and `EthanolPercent` in `internal/signals`, just waiting for
-something to call `state.SetAFR(...)` / `state.SetEthanolPercent(...)`.
+This one's worth checking *before* wiring up the real hardware, since
+it's easy to test with tools that already exist:
+
+1. Get any ELM327-based OBD-II adapter (a $10 Bluetooth/USB one is
+   fine) and a laptop.
+2. Use [python-OBD](https://python-obd.readthedocs.io/) or a generic
+   PID-request tool to send Mode 01 PID 0x24 and see if you get a
+   response at all. python-OBD has this PID built in as
+   `obd.commands.O2_S1_WR_VOLTAGE` / equivalence-ratio commands --
+   easier than crafting raw CAN frames by hand for a first check.
+3. If you get a response: note whether it came back on the standard
+   `0x7E8` address or something else, and roughly how long it took --
+   `afrPollInterval` in `internal/canbus/gt86/afr.go` assumes the ECU
+   can keep up with a request every 250ms; slow it down if not.
+4. If a functional-broadcast request (`0x7DF`, what this project sends
+   by default) gets no response, try a *physical* request to `0x7E0`
+   instead (the engine ECU's usual address) -- some ECUs are picky
+   about which addressing mode they answer. That'd mean changing
+   `obd2.FunctionalRequestID` to `0x7E0` for this specific request (or
+   generalizing `Poller`/`RequestFrame` to take a target ID per
+   request, if you want both addressing modes available at once).
+5. Sanity check the actual number: with the engine warm and idling,
+   AFR should hover close to 14.7 (lambda ~1.0). If it's stuck at 0,
+   pegged at max, or wildly implausible, something in the request
+   format or response parsing doesn't match this ECU -- compare
+   against what your OBD-II tool captured in step 2-3 byte-for-byte
+   against `obd2.RequestFrame`/`ParseSingleFrameResponse`.
+
+## Adding an aftermarket AFR source instead
+
+The OBD-II route only gets you what the factory sensor's ECU-side
+scaling allows (reportedly capped around 12.2:1 rich, per community
+reports -- see `afr.go`'s doc comment). If that turns out to be too
+limiting, or PID 0x24 doesn't work on this car at all, a standalone
+wideband controller broadcasting onto CAN (Haltech, AEM, etc. all have
+documented CAN broadcast protocols) is the fallback: find its frame
+layout, write a decoder with the same shape as `decodeTemperatures`,
+and `reg.Register(id, decoder)` it -- same pattern as everything else
+in `gt86.go`, no changes needed anywhere else in the pipeline.
+
+## Adding an aftermarket ethanol source
+
+Same idea, if you'd rather get ethanol % over CAN from an aftermarket
+controller than through the local analog sensor this project currently
+reads (`internal/sensors`): find the controller's documented frame
+layout and register a decoder the same way.

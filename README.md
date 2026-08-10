@@ -56,23 +56,24 @@ Full pin mapping: [`docs/wiring.md`](docs/wiring.md).
 
 | Signal | Source | Status |
 |---|---|---|
+| RPM | Factory CAN, `0x140` | Decoded, **unverified on this car** |
 | Coolant temp | Factory CAN, `0x360` | Decoded, **unverified on this car** |
 | Oil temp | Factory CAN, `0x360` | Decoded, **unverified on this car** |
 | Ethanol % | Local ADC (MCP3008 + flex-fuel sensor, not CAN) | Decoded, **sensor curve (0.5V=0%/4.5V=100%) unverified against the actual sensor's datasheet** |
+| AFR | OBD-II Mode 01 PID 0x24, polled from the factory wideband sensor | Decoded, **speculative**: the PID/formula are a real SAE J1979 standard, but whether this ECU replies to it over CAN hasn't been confirmed, and even if it does, forum reports say the factory sensor can't show richer than ~12.2:1 |
 | Battery voltage | — | Not found on the factory bus yet; tile is wired up and waiting |
-| AFR | — | Not on the factory bus at all; needs an aftermarket wideband broadcasting on CAN |
 
 The CAN IDs/formulas in use come from community reverse-engineering,
 not factory documentation — **do not trust them blindly**. See
 [`docs/can-reverse-engineering.md`](docs/can-reverse-engineering.md)
 for how to verify them on your own car (and how to add the missing
-ones) with a cheap USB-CAN adapter.
+ones) with a cheap USB-CAN adapter. AFR is a different kind of
+unverified — see `internal/canbus/gt86/afr.go`'s doc comment.
 
-The simulator defaults to previewing all five tiles, including the two
-(battery, AFR) without a real data source yet, so the layout can be
-designed before that hardware exists. Flip `Enable*` off in
-`cmd/simulator/main.go`'s `main()` to see exactly what the firmware
-shows today.
+The simulator defaults to previewing all six tiles, including battery
+(no data source at all yet), so the layout can be designed before that
+hardware exists. Flip `Enable*` off in `cmd/simulator/main.go`'s
+`main()` to see exactly what the firmware can show today.
 
 ## Design notes
 
@@ -92,6 +93,12 @@ shows today.
   The firmware feeds it real MCP2515 frames; a future `internal/sim`
   addition could replay a `candump` log through the same interface for
   regression testing against real captures.
+- **`internal/canbus/obd2`** implements the request/response half of
+  CAN (ISO 15765-4 Mode 01 PIDs), for signals like AFR that the ECU
+  only sends if asked, as opposed to `gt86`'s passively-broadcast IDs.
+  A `canbus.Writer` (separate from the read-only `canbus.Bus`, since
+  most sources here can't transmit) is what makes sending a request
+  possible in the first place.
 - Every package under `internal/` builds with plain `go build`/`go
   test` — only `cmd/firmware` needs TinyGo (it's gated behind a
   `//go:build tinygo` tag so `go build ./...` from the repo root
