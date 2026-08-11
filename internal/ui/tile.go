@@ -12,14 +12,37 @@ import (
 	"orochibraru/can_display/internal/signals"
 )
 
-// labelFont/valueFont are shared across every tile so the whole
+// labelFont/valueFonts are shared across every tile so the whole
 // dashboard has one consistent type scale. They're deliberately not
 // configurable per-tile -- if you want a different look, change it here
 // and every tile follows.
+//
+// valueFonts is tried largest-first in fitValueFont: most readings
+// ("8000", "16.5") fit fine at full size, but wider ones -- an extra
+// digit, a unit suffix, a leading "-" ("-14.2V") -- can be too wide for
+// a tile at 24pt and need to drop a size (or two) to stay inside it
+// instead of overflowing into the next tile or off the panel edge.
 var (
-	labelFont = &freesans.Bold9pt7b
-	valueFont = &freesans.Bold24pt7b
+	labelFont  = &freesans.Bold9pt7b
+	valueFonts = []*tinyfont.Font{
+		&freesans.Bold24pt7b,
+		&freesans.Bold18pt7b,
+		&freesans.Bold12pt7b,
+	}
 )
+
+// fitValueFont returns the largest font in valueFonts that renders s
+// within maxWidth pixels, falling back to the smallest if even that
+// overflows.
+func fitValueFont(s string, maxWidth int16) *tinyfont.Font {
+	for _, f := range valueFonts {
+		_, outer := tinyfont.LineWidth(f, s)
+		if int16(outer) <= maxWidth {
+			return f
+		}
+	}
+	return valueFonts[len(valueFonts)-1]
+}
 
 // Rect is a pixel rectangle on the display.
 type Rect struct {
@@ -90,8 +113,14 @@ func (t Tile) Draw(d display.Display, theme Theme, rect Rect, reading signals.Re
 		frac = t.Range.fraction(reading.Value)
 	}
 
+	// Margin matches labelX's left offset so the value stays visually
+	// aligned with the label above it and leaves an equal gap on the
+	// right instead of touching (or crossing) the tile's edge.
+	const valueMargin = 8
+	maxValueWidth := rect.W - 2*valueMargin
+
 	valueY := labelY + 40
-	tinyfont.WriteLine(d, valueFont, rect.X+8, valueY, valueStr, valColor)
+	tinyfont.WriteLine(d, fitValueFont(valueStr, maxValueWidth), rect.X+valueMargin, valueY, valueStr, valColor)
 
 	barRect := Rect{X: rect.X + 8, Y: rect.Y + rect.H - 12, W: rect.W - 16, H: 6}
 	drawBar(d, barRect, frac, valColor, theme.Stale)
