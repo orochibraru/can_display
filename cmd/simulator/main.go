@@ -21,8 +21,8 @@ import (
 // project targets (see /docs/wiring.md). Change these if you use a
 // different size display -- the UI layout adapts automatically.
 const (
-	panelWidth  = 320
-	panelHeight = 240
+	panelWidth  = 240
+	panelHeight = 320
 	// windowScale blows the panel up on-screen so it's actually visible
 	// on a modern desktop display; it has no effect on what would be
 	// drawn to the real panel.
