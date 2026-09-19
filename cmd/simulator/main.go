@@ -1,5 +1,5 @@
 // Command simulator opens a desktop window that renders the exact same
-// dashboard UI the ESP32 firmware draws to its ST7789 panel, fed by
+// dashboard UI the Pico W firmware draws to its ST7789 panel, fed by
 // fake data instead of a real CAN bus. It's meant to make iterating on
 // internal/ui fast: no flashing, no car required.
 package main
@@ -88,7 +88,7 @@ func (g *game) Layout(outsideWidth, outsideHeight int) (int, int) {
 
 func main() {
 	gen := sim.NewGenerator()
-	// Ethanol % has a real data source in the firmware now (an MCP3008 +
+	// Ethanol % has a real data source in the firmware now (the Pico ADC +
 	// flex-fuel sensor, see internal/sensors), so it's enabled here too
 	// for parity. Battery/AFR are still preview-only: flip them off to
 	// see exactly what the firmware can show today.

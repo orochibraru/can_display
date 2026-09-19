@@ -57,7 +57,7 @@ type Range struct {
 	DangerLow, DangerHigh float32 // outside this band -> Danger color
 }
 
-func (r Range) colorFor(v float32, t Theme) color.RGBA {
+func (r Range) ColorFor(v float32, t Theme) color.RGBA {
 	switch {
 	case v <= r.DangerLow || v >= r.DangerHigh:
 		return t.Danger
@@ -68,7 +68,7 @@ func (r Range) colorFor(v float32, t Theme) color.RGBA {
 	}
 }
 
-func (r Range) fraction(v float32) float32 {
+func (r Range) Fraction(v float32) float32 {
 	if r.Max <= r.Min {
 		return 0
 	}
@@ -109,8 +109,8 @@ func (t Tile) Draw(d display.Display, theme Theme, rect Rect, reading signals.Re
 	frac := float32(0)
 	if !stale {
 		valueStr = fmt.Sprintf(t.Format, reading.Value) + t.Unit
-		valColor = t.Range.colorFor(reading.Value, theme)
-		frac = t.Range.fraction(reading.Value)
+		valColor = t.Range.ColorFor(reading.Value, theme)
+		frac = t.Range.Fraction(reading.Value)
 	}
 
 	// Margin matches labelX's left offset so the value stays visually

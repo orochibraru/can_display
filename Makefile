@@ -1,8 +1,8 @@
 # TARGET is the TinyGo board target for the firmware build. Override on
 # the command line for a different board, e.g.:
-#   make firmware TARGET=esp32-generic
+#   make firmware TARGET=pico
 # See `tinygo targets` for the full list.
-TARGET ?= esp32-coreboard-v2
+TARGET ?= pico-w
 
 # PORT is the serial device to flash over. Override if `tinygo flash`
 # can't find it automatically, e.g.:
@@ -22,12 +22,12 @@ build-sim:
 	mkdir -p $(BIN_DIR)
 	go build -o $(BIN_DIR)/simulator ./cmd/simulator
 
-## firmware: cross-compile the ESP32 firmware to bin/firmware.bin
+## firmware: cross-compile the Pico W firmware to bin/firmware.uf2
 firmware:
 	mkdir -p $(BIN_DIR)
-	tinygo build -target $(TARGET) -o $(BIN_DIR)/firmware.bin ./cmd/firmware
+	tinygo build -target $(TARGET) -o $(BIN_DIR)/firmware.uf2 ./cmd/firmware
 
-## flash: build and flash the firmware onto a connected ESP32
+## flash: build and flash the firmware onto a Pico W (hold BOOTSEL while plugging in)
 flash:
 ifeq ($(strip $(PORT)),)
 	tinygo flash -target $(TARGET) ./cmd/firmware

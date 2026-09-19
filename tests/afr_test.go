@@ -1,20 +1,21 @@
-package gt86
+package tests
 
 import (
 	"testing"
 	"time"
 
 	"orochibraru/can_display/internal/canbus"
+	"orochibraru/can_display/internal/canbus/gt86"
 	"orochibraru/can_display/internal/canbus/obd2"
 	"orochibraru/can_display/internal/signals"
 )
 
 func TestAFRPollerSendsExpectedRequest(t *testing.T) {
 	bus := &fakeWriter{}
-	poller := AFRPoller(bus)
+	poller := gt86.AFRPoller(bus)
 
-	if len(poller.Requests) != 1 || poller.Requests[0] != afrRequest {
-		t.Fatalf("poller.Requests = %v, want [%v]", poller.Requests, afrRequest)
+	if len(poller.Requests) != 1 || poller.Requests[0] != (obd2.Request{Mode: obd2.ModeCurrentData, PID: obd2.PIDEquivalenceRatioO2S1}) {
+		t.Fatalf("poller.Requests = %v, want [%v]", poller.Requests, (obd2.Request{Mode: obd2.ModeCurrentData, PID: obd2.PIDEquivalenceRatioO2S1}))
 	}
 
 	f := obd2.RequestFrame(poller.Requests[0])
@@ -29,7 +30,7 @@ func TestAFRPollerSendsExpectedRequest(t *testing.T) {
 func TestRegisterAFRDecodesResponse(t *testing.T) {
 	state := &signals.State{}
 	reg := canbus.NewRegistry()
-	registerAFR(reg, state)
+	gt86.Register(reg, state)
 
 	// raw=32768 (0x8000) -> lambda 1.0 -> AFR = 14.7 (stoichiometric).
 	response := canbus.Frame{
@@ -43,15 +44,15 @@ func TestRegisterAFRDecodesResponse(t *testing.T) {
 	if !snap.AFR.Valid {
 		t.Fatal("AFR should be valid after a well-formed response")
 	}
-	if diff := snap.AFR.Value - gasolineStoichAFR; diff < -0.01 || diff > 0.01 {
-		t.Errorf("AFR = %v, want ~%v", snap.AFR.Value, gasolineStoichAFR)
+	if diff := snap.AFR.Value - 14.7; diff < -0.01 || diff > 0.01 {
+		t.Errorf("AFR = %v, want ~%v", snap.AFR.Value, 14.7)
 	}
 }
 
 func TestRegisterAFRIgnoresUnrelatedResponses(t *testing.T) {
 	state := &signals.State{}
 	reg := canbus.NewRegistry()
-	registerAFR(reg, state)
+	gt86.Register(reg, state)
 
 	// Same response ID, but answering a different PID -- must not be
 	// mistaken for an AFR reading.

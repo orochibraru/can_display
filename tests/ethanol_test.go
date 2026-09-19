@@ -1,6 +1,10 @@
-package sensors
+package tests
 
-import "testing"
+import (
+	"testing"
+
+	"orochibraru/can_display/internal/sensors"
+)
 
 func TestEthanolPercent(t *testing.T) {
 	cases := []struct {
@@ -14,9 +18,9 @@ func TestEthanolPercent(t *testing.T) {
 		{5, 100},   // above sensor max -> clamp to 100
 	}
 	for _, c := range cases {
-		got := EthanolPercent(c.volts)
+		got := sensors.EthanolPercent(c.volts)
 		if !approxEqual(got, c.want, 0.01) {
-			t.Errorf("EthanolPercent(%v) = %v, want %v", c.volts, got, c.want)
+			t.Errorf("sensors.EthanolPercent(%v) = %v, want %v", c.volts, got, c.want)
 		}
 	}
 }

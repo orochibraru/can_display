@@ -1,25 +1,12 @@
 # can_display
 
 A DIY CAN bus gauge cluster for a 2015 Toyota GT86, built in TinyGo for
-an ESP32 + SPI square display.
+a Raspberry Pi Pico W(H) + SPI TFT display.
 
 The project is split so the dashboard UI can be built and iterated on
-without a car, an ESP32, or any wiring at all:
+without a car, a Pico, or any wiring at all:
 
-```
-internal/
-  signals/    vehicle signal state (current value + staleness), hardware-agnostic
-  canbus/     CAN Frame/Bus/Decoder types, hardware-agnostic
-  canbus/gt86/  GT86-specific decoders (which CAN IDs mean what)
-  display/    the Display interface everything renders onto
-  ui/         the actual dashboard: theme, tiles, layout
-  sim/        fake data generator, for development without a car
-cmd/
-  simulator/  native desktop app (go run), fake data -> internal/ui
-  firmware/   ESP32 firmware (tinygo build), real CAN -> internal/ui
-```
-
-`cmd/simulator` and `cmd/firmware` both render the *exact same*
+`cmd/simulator` and `cmd/firmware` both render the _exact same_
 `internal/ui.Dashboard` — the simulator is a true preview, not a
 lookalike. Only pin wiring and how frames arrive (real MCP2515 vs. a
 fake generator) differ between the two.
@@ -30,8 +17,8 @@ fake generator) differ between the two.
 make sim        # opens a desktop window with the live dashboard, fake data
 make vet         # go vet the shared/simulator code + tinygo-build-check the firmware
 make test        # unit tests for the hardware-agnostic packages
-make firmware    # cross-compile firmware to bin/firmware.bin (needs tinygo)
-make flash       # build + flash onto a connected ESP32 (needs tinygo)
+make firmware    # cross-compile firmware to bin/firmware.uf2 (needs tinygo)
+make flash       # build + flash onto a Pico W held in BOOTSEL (needs tinygo)
 ```
 
 Requires [Go](https://go.dev) and, for the firmware targets,
@@ -40,28 +27,25 @@ tinygo` on macOS).
 
 ## Hardware this targets
 
-- ESP32 dev board (classic ESP32, not C3/S3 — see `docs/wiring.md` if
-  you're on a different chip)
-- ST7789 2.0" 240x320 SPI TFT display
+- Raspberry Pi Pico W / WH (RP2040)
+- ST7789 V2.2 2.0" 240x320 SPI TFT display
 - MCP2515 SPI CAN controller module, wired to the OBD-II port's CAN H/L
   (pins 6/14)
-- MCP3008 SPI ADC + an analog (0.5V-4.5V) flex-fuel sensor, for ethanol
-  % — the classic ESP32 has no usable ADC in TinyGo, so this is read
-  externally instead of through the chip's own ADC pins (see
-  `docs/wiring.md`)
+- An analog (0.5V-4.5V) flex-fuel sensor for ethanol %, read through
+  a resistor divider on the Pico's own ADC (see `docs/wiring.md`)
 
 Full pin mapping: [`docs/wiring.md`](docs/wiring.md).
 
 ## What actually works today
 
-| Signal | Source | Status |
-|---|---|---|
-| RPM | Factory CAN, `0x140` | Decoded, **unverified on this car** |
-| Coolant temp | Factory CAN, `0x360` | Decoded, **unverified on this car** |
-| Oil temp | Factory CAN, `0x360` | Decoded, **unverified on this car** |
-| Ethanol % | Local ADC (MCP3008 + flex-fuel sensor, not CAN) | Decoded, **sensor curve (0.5V=0%/4.5V=100%) unverified against the actual sensor's datasheet** |
-| AFR | OBD-II Mode 01 PID 0x24, polled from the factory wideband sensor | Decoded, **speculative**: the PID/formula are a real SAE J1979 standard, but whether this ECU replies to it over CAN hasn't been confirmed, and even if it does, forum reports say the factory sensor can't show richer than ~12.2:1 |
-| Battery voltage | — | Not found on the factory bus yet; tile is wired up and waiting |
+| Signal          | Source                                                           | Status                                                                                                                                                                                                                               |
+| --------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| RPM             | Factory CAN, `0x140`                                             | Decoded, **unverified on this car**                                                                                                                                                                                                  |
+| Coolant temp    | Factory CAN, `0x360`                                             | Decoded, **unverified on this car**                                                                                                                                                                                                  |
+| Oil temp        | Factory CAN, `0x360`                                             | Decoded, **unverified on this car**                                                                                                                                                                                                  |
+| Ethanol %       | Pico ADC (flex-fuel sensor, not CAN)                             | Decoded, **sensor curve (0.5V=0%/4.5V=100%) unverified against the actual sensor's datasheet**                                                                                                                                       |
+| AFR             | OBD-II Mode 01 PID 0x24, polled from the factory wideband sensor | Decoded, **speculative**: the PID/formula are a real SAE J1979 standard, but whether this ECU replies to it over CAN hasn't been confirmed, and even if it does, forum reports say the factory sensor can't show richer than ~12.2:1 |
+| Battery voltage | —                                                                | Not found on the factory bus yet; tile is wired up and waiting                                                                                                                                                                       |
 
 The CAN IDs/formulas in use come from community reverse-engineering,
 not factory documentation — **do not trust them blindly**. See
@@ -85,7 +69,7 @@ hardware exists. Flip `Enable*` off in `cmd/simulator/main.go`'s
   sensors (currently just ethanol %) — the non-CAN counterpart to
   `internal/canbus/gt86`. Pure functions, no hardware access, so the
   voltage-divider and sensor-curve math is unit tested without needing
-  an ESP32 or a multimeter.
+  a board or a multimeter.
 - **Text rendering** uses `tinygo.org/x/tinyfont` (`freesans`) on both
   targets, on purpose — the simulator should look pixel-for-pixel like
   the real panel, not just "similar."
@@ -103,7 +87,9 @@ hardware exists. Flip `Enable*` off in `cmd/simulator/main.go`'s
   counts as normal/warning/danger for any gauge (idle RPM redline,
   coolant/oil temp limits, etc.) — `dashboard.go` just wires those
   values into tiles and shouldn't need to change alongside them.
+- Tests live in `tests/` as an external package, so they only see
+  exported API.
 - Every package under `internal/` builds with plain `go build`/`go
-  test` — only `cmd/firmware` needs TinyGo (it's gated behind a
+test` — only `cmd/firmware` needs TinyGo (it's gated behind a
   `//go:build tinygo` tag so `go build ./...` from the repo root
   doesn't try and fail to compile it).

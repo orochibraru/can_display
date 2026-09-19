@@ -1,9 +1,9 @@
 //go:build tinygo
 
-// Command firmware is the ESP32 program: it reads the GT86's CAN bus
-// through an MCP2515 SPI controller, reads the flex-fuel sensor through
-// an MCP3008 SPI ADC, and renders internal/ui's dashboard to an ST7789
-// SPI display. It shares every package under internal/ with
+// Command firmware is the Raspberry Pi Pico W program: it reads the
+// GT86's CAN bus through an MCP2515 SPI controller, reads the flex-fuel
+// sensor through the RP2040's own ADC, and renders internal/ui's
+// dashboard to an ST7789 SPI display. It shares every package under internal/ with
 // cmd/simulator -- only this file and the pin wiring are specific to
 // real hardware.
 //
@@ -16,9 +16,7 @@ import (
 	"machine"
 	"time"
 
-	"tinygo.org/x/drivers"
 	"tinygo.org/x/drivers/mcp2515"
-	"tinygo.org/x/drivers/mcp3008"
 	"tinygo.org/x/drivers/st7789"
 
 	"orochibraru/can_display/internal/canbus"
@@ -31,33 +29,28 @@ import (
 // Pin wiring -- adjust these to match your actual breadboard/PCB layout;
 // see /docs/wiring.md for the reference wiring this project assumes.
 //
-// The classic ESP32 only has two general-purpose SPI peripherals
-// (SPI2/SPI3 -- SPI0/SPI1 are reserved for flash). The display gets its
-// own bus (SPI2); the MCP2515 CAN controller and MCP3008 ADC share the
-// other (SPI3) with separate chip-selects, since neither needs the bus
-// often enough for that to matter.
+// The RP2040 has two SPI peripherals: the display gets SPI0, the MCP2515
+// gets SPI1. GPIO23/24/25/29 are taken by the Pico W's wireless chip.
 const (
 	displaySCK   = machine.GPIO18
-	displaySDO   = machine.GPIO23 // MOSI; display is write-only, no MISO needed
-	displayReset = machine.GPIO4
-	displayDC    = machine.GPIO2
-	displayCS    = machine.GPIO5
-	displayBL    = machine.GPIO15
+	displaySDO   = machine.GPIO19 // MOSI; display is write-only, no MISO needed
+	displayCS    = machine.GPIO17
+	displayDC    = machine.GPIO20
+	displayReset = machine.GPIO21
+	displayBL    = machine.GPIO22
 
-	sharedSCK = machine.GPIO14
-	sharedSDO = machine.GPIO13 // MOSI
-	sharedSDI = machine.GPIO12 // MISO
-	canCS     = machine.GPIO27
-	ethanolCS = machine.GPIO26
+	canSCK = machine.GPIO10
+	canSDO = machine.GPIO11 // MOSI
+	canSDI = machine.GPIO12 // MISO
+	canCS  = machine.GPIO13
 
-	// ethanolADCChannel is which MCP3008 input the flex-fuel sensor's
-	// (divided-down) signal is wired to. See /docs/wiring.md.
-	ethanolADCChannel = 0
+	// ethanolPin is ADC0, fed through the divider in /docs/wiring.md.
+	ethanolPin = machine.ADC0
 )
 
-// adcVref is the MCP3008's reference voltage. The MCP3008 is powered
-// from the ESP32's 3.3V rail here (so its SPI logic levels match the
-// ESP32 without a level shifter), which also sets its analog reference.
+// adcVref is the RP2040 ADC reference (the 3.3V rail on a stock Pico W).
+// Tune it against a multimeter: the onboard reference is noisy and
+// typically reads a few tens of mV off.
 const adcVref float32 = 3.3
 
 // panelWidth/panelHeight must match cmd/simulator's constants -- both
@@ -76,9 +69,8 @@ const tickInterval = 100 * time.Millisecond
 
 func main() {
 	display := setupDisplay()
-	sharedSPI := setupSharedSPI()
-	can := setupCAN(sharedSPI)
-	ethanolADC := setupEthanolADC(sharedSPI)
+	can := setupCAN()
+	ethanolADC := setupEthanolADC()
 
 	state := &signals.State{}
 	reg := canbus.NewRegistry()
@@ -117,24 +109,17 @@ func main() {
 	}
 }
 
-// updateEthanolPercent reads the flex-fuel sensor through the MCP3008,
+// updateEthanolPercent reads the flex-fuel sensor through the ADC,
 // undoes the resistor divider, and converts the result to a percentage.
 // See internal/sensors for the conversion math and its caveats.
-func updateEthanolPercent(adc *mcp3008.Device, state *signals.State) {
-	raw, err := adc.Read(ethanolADCChannel)
-	if err != nil {
-		// Leave the last known reading in place; if the ADC is actually
-		// dead this signal will go stale on its own and the dashboard
-		// will show "--" rather than a frozen number.
-		return
-	}
-	adcVolts := sensors.RawToVolts(raw, adcVref)
+func updateEthanolPercent(adc machine.ADC, state *signals.State) {
+	adcVolts := sensors.RawToVolts(adc.Get(), adcVref)
 	sensorVolts := sensors.EthanolDivider.Undo(adcVolts)
 	state.SetEthanolPercent(sensors.EthanolPercent(sensorVolts), time.Now())
 }
 
 func setupDisplay() st7789.Device {
-	spi := machine.SPI2
+	spi := machine.SPI0
 	err := spi.Configure(machine.SPIConfig{
 		Frequency: 40e6,
 		SCK:       displaySCK,
@@ -153,28 +138,21 @@ func setupDisplay() st7789.Device {
 	return dev
 }
 
-// setupSharedSPI configures the bus the MCP2515 and MCP3008 share.
-//
-// The clock is deliberately conservative (1MHz): the MCP3008 is only
-// rated for a couple MHz when powered at 3.3V (its max SPI clock scales
-// with VDD), while the MCP2515 is happy anywhere up to several MHz. One
-// shared frequency has to satisfy both, and neither device is read
-// often enough for 1MHz to be a bottleneck.
-func setupSharedSPI() drivers.SPI {
-	spi := machine.SPI3
+// setupCAN brings up the MCP2515 on SPI1. 1MHz is conservative on
+// purpose: it's plenty for dashboard-rate data and survives cheap level
+// shifters and long jumper wires.
+func setupCAN() *mcp2515.Device {
+	spi := machine.SPI1
 	err := spi.Configure(machine.SPIConfig{
 		Frequency: 1e6,
-		SCK:       sharedSCK,
-		SDO:       sharedSDO,
-		SDI:       sharedSDI,
+		SCK:       canSCK,
+		SDO:       canSDO,
+		SDI:       canSDI,
 	})
 	if err != nil {
-		panic("shared SPI configure: " + err.Error())
+		panic("CAN SPI configure: " + err.Error())
 	}
-	return spi
-}
 
-func setupCAN(spi drivers.SPI) *mcp2515.Device {
 	dev := mcp2515.New(spi, canCS)
 	dev.Configure(mcp2515.Configuration{Extended: false})
 
@@ -187,8 +165,9 @@ func setupCAN(spi drivers.SPI) *mcp2515.Device {
 	return dev
 }
 
-func setupEthanolADC(spi drivers.SPI) *mcp3008.Device {
-	dev := mcp3008.New(spi, ethanolCS)
-	dev.Configure()
-	return dev
+func setupEthanolADC() machine.ADC {
+	machine.InitADC()
+	adc := machine.ADC{Pin: ethanolPin}
+	adc.Configure(machine.ADCConfig{})
+	return adc
 }

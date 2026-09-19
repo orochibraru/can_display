@@ -1,6 +1,10 @@
-package obd2
+package tests
 
-import "testing"
+import (
+	"testing"
+
+	"orochibraru/can_display/internal/canbus/obd2"
+)
 
 func TestEquivalenceRatio(t *testing.T) {
 	cases := []struct {
@@ -15,9 +19,9 @@ func TestEquivalenceRatio(t *testing.T) {
 		{nil, false, 0},
 	}
 	for _, c := range cases {
-		got, ok := EquivalenceRatio(c.payload)
+		got, ok := obd2.EquivalenceRatio(c.payload)
 		if ok != c.wantOK {
-			t.Errorf("EquivalenceRatio(%v) ok = %v, want %v", c.payload, ok, c.wantOK)
+			t.Errorf("obd2.EquivalenceRatio(%v) ok = %v, want %v", c.payload, ok, c.wantOK)
 			continue
 		}
 		if !ok {
@@ -28,7 +32,7 @@ func TestEquivalenceRatio(t *testing.T) {
 			diff = -diff
 		}
 		if diff > 0.001 {
-			t.Errorf("EquivalenceRatio(%v) = %v, want ~%v", c.payload, got, c.wantApprox)
+			t.Errorf("obd2.EquivalenceRatio(%v) = %v, want ~%v", c.payload, got, c.wantApprox)
 		}
 	}
 }

@@ -1,6 +1,10 @@
-package sensors
+package tests
 
-import "testing"
+import (
+	"testing"
+
+	"orochibraru/can_display/internal/sensors"
+)
 
 func approxEqual(a, b, tolerance float32) bool {
 	diff := a - b
@@ -21,15 +25,15 @@ func TestRawToVolts(t *testing.T) {
 		{32768, 3.3, 1.65},
 	}
 	for _, c := range cases {
-		got := RawToVolts(c.raw, c.vref)
+		got := sensors.RawToVolts(c.raw, c.vref)
 		if !approxEqual(got, c.want, 0.01) {
-			t.Errorf("RawToVolts(%d, %v) = %v, want ~%v", c.raw, c.vref, got, c.want)
+			t.Errorf("sensors.RawToVolts(%d, %v) = %v, want ~%v", c.raw, c.vref, got, c.want)
 		}
 	}
 }
 
 func TestDividerRoundTrip(t *testing.T) {
-	d := Divider{R1: 10_000, R2: 22_000}
+	d := sensors.Divider{R1: 10_000, R2: 22_000}
 
 	sensorVolts := float32(4.5)
 	measured := sensorVolts * d.Ratio()
@@ -41,10 +45,10 @@ func TestDividerRoundTrip(t *testing.T) {
 }
 
 func TestEthanolDividerStaysUnderRailVoltage(t *testing.T) {
-	// The whole point of EthanolDivider: the sensor's worst-case output
+	// The whole point of sensors.EthanolDivider: the sensor's worst-case output
 	// must land safely under a 3.3V rail once divided.
 	const maxSafeVolts = 3.3
-	worstCase := EthanolSensorMaxVolts * EthanolDivider.Ratio()
+	worstCase := sensors.EthanolSensorMaxVolts * sensors.EthanolDivider.Ratio()
 	if worstCase >= maxSafeVolts {
 		t.Errorf("divided sensor max = %vV, want comfortably under %vV", worstCase, maxSafeVolts)
 	}
